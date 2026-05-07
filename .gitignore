@@ -1,0 +1,8 @@
+# Generated VULCAN/FastChem outputs
+output/
+fastchem_vulcan/output/
+
+# FastChem build products
+fastchem_vulcan/fastchem
+fastchem_vulcan/obj/*.o
+fastchem_vulcan/obj/*.d
