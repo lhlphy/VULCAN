@@ -45,11 +45,16 @@ bool read_config_file(std::string file_path, std::string& fastchem_options_file,
 
 
   std::string line;
+  auto trim_cr = [](std::string& value)
+  {
+    if (!value.empty() && value.back() == '\r') value.pop_back();
+  };
 
   //FastChem parameter file
   std::getline(file, line);
 
   std::getline(file, line);
+  trim_cr(line);
   fastchem_options_file = line;
 
   if (line == "")
@@ -65,6 +70,7 @@ bool read_config_file(std::string file_path, std::string& fastchem_options_file,
   std::getline(file, line);
 
   std::getline(file, line);
+  trim_cr(line);
   atmosphere_file = line;
 
   if (line == "")
@@ -80,6 +86,7 @@ bool read_config_file(std::string file_path, std::string& fastchem_options_file,
   std::getline(file, line);
 
   std::getline(file, line);
+  trim_cr(line);
   chem_output_file = line;
 
   if (line == "")
@@ -95,6 +102,7 @@ bool read_config_file(std::string file_path, std::string& fastchem_options_file,
   std::getline(file, line);
 
   std::getline(file, line);
+  trim_cr(line);
   monitor_output_file = line;
 
   if (line == "")
@@ -110,6 +118,7 @@ bool read_config_file(std::string file_path, std::string& fastchem_options_file,
   std::getline(file, line);
 
   std::getline(file, line);
+  trim_cr(line);
   if (line == "")
     std::cout << "Unable to read verbose option from: " << file_path.c_str() << " , using value of 4 from here on" << "\n";
   else
@@ -121,6 +130,7 @@ bool read_config_file(std::string file_path, std::string& fastchem_options_file,
   std::getline(file, line);
 
   std::getline(file, line);
+  trim_cr(line);
   if (line == "MR")
     output_mixing_ratios = true;
   else
