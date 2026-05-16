@@ -3,12 +3,10 @@
 # ============================================================================= 
 
 # ====== Setting up the elements included in the network ======
-atom_list = ['H', 'O', 'P',  'He']
+atom_list = ['H', 'O', 'C', 'N', 'S',  'He']
 # ====== Setting up paths and filenames for the input and output files  ======
 # input:
-#network = 'thermo/SNCHO_full_photo_network.txt'
-
-network = 'thermo/PHO_full_photo_network.txt'
+network = 'thermo/SNCHO_photo_network_2025.txt'
 use_lowT_limit_rates = False
 gibbs_text = 'thermo/gibbs_text.txt' # (all the nasa9 files must be placed in the folder: thermo/NASA9/)
 cross_folder = 'thermo/photo_cross/'
@@ -22,7 +20,7 @@ vul_ini = 'output/' # the file to initialize the abundances for ini_mix = 'vulca
 output_dir = 'output/'
 plot_dir = 'plot/'
 movie_dir = 'plot/movie/'
-out_name =  'HD189-PHO-test-noPhoto.vul' # output file name
+out_name =  'HD189-test.vul' # output file name
 
 # ====== Setting up the elemental abundance ======
 use_solar = True # True: using the solar abundance from Table 8. K.Lodders 2019; False: using the customized elemental abundance. 
@@ -156,7 +154,7 @@ conver_ignore = [] # added 2023. to get rid off non-convergent species, e.g. HC3
 rtol = 0.25             # relative tolerence for adjusting the stepsize 
 post_conden_rtol = 0.1 # switched to this value after fix_species_time
 use_adapt_rtol = True
-rtol_min = 0.02
+rtol_min = 0.01
 rtol_max = 2.5  
 
 # ====== Setting up for ouwtput and plotting ======
@@ -173,7 +171,7 @@ use_PIL = True
 live_plot_frq = 10
 save_movie_rate = live_plot_frq
 y_time_freq = 1  #  storing data for every 'y_time_freq' step
-plot_spec = ['H2O', 'H', 'PH3', 'PO', 'P2O3' ]
+plot_spec = ['H2O', 'CH4', 'CO', 'CO2', 'NH3', 'HCN', 'H2S', 'SO2']
 # output:
 output_humanread = False
 use_shark = False

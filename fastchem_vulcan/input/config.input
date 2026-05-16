@@ -15,3 +15,4 @@ output/monitor_output.dat
 
 #Output mixing ratios (MR) or particle number densities (ND, default)?
 MR
+
