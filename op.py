@@ -1186,16 +1186,19 @@ class Integration(object):
         var.t += var.dt   
         para.count += 1
         
-        # tmp = list(var.y)
-        #if para.count % self.y_time_freq ==0:
-        var.y_time.append(var.y)
-        #var.ymix_time.append(var.ymix.copy())
-        var.t_time.append(var.t)
+        save_history = True
+        if self.gcm_nudge is not None and vulcan_cfg.y_time_freq > 1:
+            save_history = (para.count % vulcan_cfg.y_time_freq == 0)
+
+        if save_history:
+            var.y_time.append(var.y.copy())
+            var.t_time.append(var.t)
     
         # only used in PI_control
         # var.dy_time.append(var.y)
         # var.dydt_time.append(var.dydt)
-        var.atom_loss_time.append(list(var.atom_loss.values()) )
+        if save_history:
+            var.atom_loss_time.append(list(var.atom_loss.values()) )
         
         return var, para
         
@@ -1523,6 +1526,7 @@ class ODESolver(object):
         self.atol = vulcan_cfg.atol
         self.non_gas_sp = vulcan_cfg.non_gas_sp
         self.gcm_nudge = None
+        self.delta_ignore_index = [species.index(sp) for sp in getattr(vulcan_cfg, 'delta_ignore', []) if sp in species]
         
         if vulcan_cfg.use_condense == True:  
             self.non_gas_sp_index = [species.index(sp) for sp in self.non_gas_sp]
@@ -3044,6 +3048,8 @@ class Ros2(ODESolver):
         delta = np.abs(sol-yk2)
         delta[ymix < self.mtol] = 0
         delta[sol < self.atol] = 0
+        if self.delta_ignore_index:
+            delta[:, self.delta_ignore_index] = 0
                 
         # neglecting the errors at the surface
         if vulcan_cfg.use_botflux == True or vulcan_cfg.use_fix_sp_bot: delta[0] = 0
@@ -3146,6 +3152,8 @@ class Ros2(ODESolver):
         delta = np.abs(sol-yk2)
         delta[ymix < self.mtol] = 0
         delta[sol < self.atol] = 0
+        if self.delta_ignore_index:
+            delta[:, self.delta_ignore_index] = 0
         
         delta = np.amax( delta[sol>0]/sol[sol>0] )
 
@@ -3352,6 +3360,12 @@ class Output(object):
             print( 'Directory ' , output_dir,  " created.")
             os.mkdir(output_dir)
             
+        if vulcan_cfg.save_evolution == True:
+            if len(var.t_time) == 0 or var.t_time[-1] != var.t:
+                var.y_time.append(var.y.copy())
+                var.t_time.append(var.t)
+                var.atom_loss_time.append(list(var.atom_loss.values()))
+
         # convert lists into numpy arrays
         for key in var.var_evol_save:
             as_nparray = np.array(getattr(var, key))
@@ -3374,6 +3388,11 @@ class Output(object):
             fq = vulcan_cfg.save_evo_frq
             for key in var.var_evol_save:
                 as_nparray = getattr(var, key)[::fq]
+                full_nparray = getattr(var, key)
+                if len(full_nparray) and len(as_nparray):
+                    last_value = full_nparray[-1:]
+                    if not np.array_equal(as_nparray[-1:], last_value):
+                        as_nparray = np.concatenate((as_nparray, last_value), axis=0)
                 setattr(var, key, as_nparray)
                 var_save[key] = getattr(var, key)
 
@@ -3384,6 +3403,43 @@ class Output(object):
                 # the protocol must be <= 2 for python 2.X
                 pickle.dump( {'variable': var_save, 'atm': vars(atm), 'parameter': vars(para) }, outfile, protocol=4)
                 # how to add  'config': vars(vulcan_cfg) ?
+
+        self.run_gcm_nudge_postprocess(output_file, dname)
+
+    def run_gcm_nudge_postprocess(self, output_file, dname):
+        if vulcan_cfg.atm_type != 'gcm_nudge' and vulcan_cfg.ini_mix != 'gcm_nudge':
+            return
+        if getattr(vulcan_cfg, 'use_gcm_nudge_postproc', False) != True:
+            return
+
+        print('Running gcm_nudge post-processing plots...')
+
+        plot_dir = os.path.join(dname, vulcan_cfg.plot_dir)
+        if not os.path.exists(plot_dir):
+            os.makedirs(plot_dir)
+
+        time_series_plot = os.path.join(
+            dname,
+            getattr(vulcan_cfg, 'gcm_nudge_time_series_plot', vulcan_cfg.plot_dir + 'gcm_nudge_time_series.png')
+        )
+        profiles_plot = os.path.join(
+            dname,
+            getattr(vulcan_cfg, 'gcm_nudge_profiles_plot', vulcan_cfg.plot_dir + 'gcm_nudge_profiles.png')
+        )
+
+        from tools.plot_gcm_nudge_time_series import plot_time_series
+        from tools.plot_gcm_nudge_profiles import plot_profiles
+
+        plot_time_series(
+            vul_file=output_file,
+            driver_file=vulcan_cfg.gcm_nudge_file,
+            output=time_series_plot,
+        )
+        plot_profiles(
+            vul_file=output_file,
+            driver_file=vulcan_cfg.gcm_nudge_file,
+            output=profiles_plot,
+        )
         
             
     def plot_update(self, var, atm, para):

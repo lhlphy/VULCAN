@@ -72,8 +72,8 @@ if use_photo == False and use_ion == True:
 atm_base = 'CO2' #Options: 'H2', 'N2', 'O2', 'CO2 -- the bulk gas of the atmosphere: changes the molecular diffsion, thermal diffusion factor, and settling velocity
 rocky = False # for the surface gravity
 nz = 120   # number of vertical layers
-P_b = 1e9  # pressure at the bottom (dyne/cm^2)
-P_t = 1e-2 # pressure at the top (dyne/cm^2)
+P_b = 2e7  # pressure at the bottom (dyne/cm^2); 20 bar, slightly above the current GCM total-pressure maximum
+P_t = 1e-2 # pressure at the top (dyne/cm^2); 0.001 Pa
 use_Kzz = True
 use_moldiff = True
 use_vm_mol = False # use upwind scheme for molecular diffusion -- under testing
@@ -136,13 +136,13 @@ trun_min = 1e2
 runtime = 1.E22
 dt_min = 1.E-14
 dt_max = runtime*1e-5
-dt_var_max = 2.
+dt_var_max = 5.
 dt_var_min = 0.5
 count_min = 120
-count_max = int(1E4)
+count_max = int(5E4)
 atol = 1.E-1 # Try decreasing this if the solutions are not stable
-mtol = 1.E-22
-mtol_conv = 1.E-20
+mtol = 1.E-16
+mtol_conv = 1.E-16
 pos_cut = 0
 nega_cut = -1.
 loss_eps = 1e-1
@@ -153,12 +153,13 @@ flux_cri = 0.1
 flux_atol = 1. # the tol for actinc flux (# photons cm-2 s-1 nm-1)
 ### use with caution
 conver_ignore = [] # added 2023. to get rid off non-convergent species, e.g. HC3N without sinks 
+delta_ignore = ['OH']
 loss_ex = ['O', 'Si']
 
 # ====== Setting up numerical parameters for Ros2 ODE solver ====== 
-rtol = 0.25             # relative tolerence for adjusting the stepsize 
+rtol = 2.5             # relative tolerence for adjusting the stepsize 
 post_conden_rtol = 0.1 # switched to this value after fix_species_time
-use_adapt_rtol = True
+use_adapt_rtol = False
 rtol_min = 0.01
 rtol_max = 2.5  
 
@@ -175,10 +176,13 @@ plot_height = False
 use_PIL = True 
 live_plot_frq = 10
 save_movie_rate = live_plot_frq
-y_time_freq = 1  #  storing data for every 'y_time_freq' step
+y_time_freq = 10  # storing data every N steps in gcm_nudge mode to keep long timed runs memory-safe
 plot_spec = ['CO', 'CO2', 'SiO', 'SiO2']
 # output:
 output_humanread = False
 use_shark = False
-save_evolution = False   # save the evolution of chemistry (y_time and t_time) for every save_evo_frq step
+save_evolution = True   # required by the gcm_nudge post-processing tools
 save_evo_frq = 10
+use_gcm_nudge_postproc = True
+gcm_nudge_time_series_plot = 'plot/HD189-gcm-nudge_time_series.png'
+gcm_nudge_profiles_plot = 'plot/HD189-gcm-nudge_profiles.png'
