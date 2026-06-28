@@ -1,0 +1,12 @@
+# Generated VULCAN/FastChem outputs
+output/
+fastchem_vulcan/output/
+plot/
+thermo/Database_search/data_temp/
+__pycache__/
+atm/gcm_columns/
+
+# FastChem build products
+fastchem_vulcan/fastchem
+fastchem_vulcan/obj/*.o
+fastchem_vulcan/obj/*.d

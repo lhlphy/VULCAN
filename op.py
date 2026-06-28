@@ -30,6 +30,7 @@ except ImportError:
     except: vulcan_cfg.use_PIL = False
 
 import build_atm
+import gcm_nudge
 import chem_funs
 from chem_funs import ni, nr  # number of species and reactions in the network
 
@@ -803,6 +804,35 @@ class Integration(object):
         if vulcan_cfg.use_condense == True:  
             self.non_gas_sp_index = [species.index(sp) for sp in self.non_gas_sp]
             self.condense_sp_index = [species.index(sp) for sp in vulcan_cfg.condense_sp]
+
+        self.gcm_nudge = None
+        self.sio_index = None
+        self.sio2_index = None
+        self.other_si_indices = np.array([], dtype=int)
+        self.non_si_indices = np.array([], dtype=int)
+        self.non_target_indices = np.array([], dtype=int)
+        self.co2_index = species.index('CO2') if 'CO2' in species else None
+
+        if vulcan_cfg.atm_type == 'gcm_nudge' or vulcan_cfg.ini_mix == 'gcm_nudge':
+            if 'SiO' not in species or 'SiO2' not in species:
+                raise IOError('gcm_nudge mode requires both SiO and SiO2 in the active network.')
+            self.gcm_nudge = gcm_nudge.get_nudge_setup()
+            self.sio_index = species.index('SiO')
+            self.sio2_index = species.index('SiO2')
+            self.other_si_indices = np.array(
+                [i for i, sp in enumerate(species) if compo[compo_row.index(sp)]['Si'] > 0 and sp not in ('SiO', 'SiO2')],
+                dtype=int,
+            )
+            self.non_si_indices = np.array(
+                [i for i, sp in enumerate(species) if compo[compo_row.index(sp)]['Si'] == 0 and sp not in ('SiO', 'SiO2')],
+                dtype=int,
+            )
+            self.non_target_indices = np.array(
+                [i for i in range(ni) if i not in (self.sio_index, self.sio2_index)],
+                dtype=int,
+            )
+
+        self.odesolver.gcm_nudge = self.gcm_nudge
         
         
     def __call__(self, var, atm, para, make_atm):
@@ -813,6 +843,8 @@ class Integration(object):
         while not self.stop(var, para, atm): # Looping until the stop condition is satisfied
             
             var = self.backup(var)
+            if self.gcm_nudge is not None:
+                var = self.limit_gcm_nudge_dt(var)
             
             # updating tau, flux, and the photolosys rate
             # swtiching to final_update_photo_frq
@@ -900,6 +932,9 @@ class Integration(object):
                         var = self.h2o_conden_evap_relax(var,atm)
                     if 'NH3' in vulcan_cfg.use_relax:
                         var = self.nh3_conden_evap_relax(var,atm)
+
+            if self.gcm_nudge is not None:
+                var = self.apply_gcm_nudge(var, atm)
                                           
             if para.count % vulcan_cfg.update_frq == 0: # updating mu and dz (dzi) due to diffusion
                 atm = self.update_mu_dz(var, atm, make_atm)
@@ -939,6 +974,58 @@ class Integration(object):
         var.y_prev = np.copy(var.y)
         var.dy_prev = np.copy(var.dy)
         var.atom_loss_prev = var.atom_loss.copy()
+        return var
+
+    def limit_gcm_nudge_dt(self, var):
+        dt_cap = 0.1 * self.gcm_nudge['min_frame_dt_sec']
+        time_remaining = self.gcm_nudge['timed_run_end_sec'] - var.t
+        if time_remaining > 0.:
+            dt_cap = min(dt_cap, time_remaining)
+        var.dt = min(var.dt, dt_cap)
+        return var
+
+    def apply_gcm_nudge(self, var, atm):
+        target = gcm_nudge.interpolate_nudge_targets(var.t + var.dt)
+        if target['active'] is False:
+            return var
+
+        tau_sec = target['tau_sec']
+        if tau_sec <= 0.:
+            raise IOError(f'Invalid gcm_nudge relaxation timescale: {tau_sec}')
+
+        ymix = np.copy(var.ymix)
+        sio_new = (ymix[:, self.sio_index] + var.dt/tau_sec * target['sio_target']) / (1. + var.dt/tau_sec)
+        sio2_new = (ymix[:, self.sio2_index] + var.dt/tau_sec * target['sio2_target']) / (1. + var.dt/tau_sec)
+
+        sio_new = np.clip(sio_new, 0., 1.)
+        sio2_new = np.clip(sio2_new, 0., 1.)
+
+        for lev in range(nz):
+            ymix[lev, self.sio_index] = sio_new[lev]
+            ymix[lev, self.sio2_index] = min(sio2_new[lev], 1. - ymix[lev, self.sio_index])
+            residual = max(1. - ymix[lev, self.sio_index] - ymix[lev, self.sio2_index], 0.)
+
+            other_si_sum = np.sum(ymix[lev, self.other_si_indices]) if self.other_si_indices.size else 0.
+            non_si_sum = np.sum(ymix[lev, self.non_si_indices]) if self.non_si_indices.size else 0.
+
+            if self.non_si_indices.size and other_si_sum <= residual and non_si_sum > 0.:
+                ymix[lev, self.non_si_indices] *= (residual - other_si_sum) / non_si_sum
+            else:
+                non_target_sum = np.sum(ymix[lev, self.non_target_indices]) if self.non_target_indices.size else 0.
+                if non_target_sum > 0.:
+                    ymix[lev, self.non_target_indices] *= residual / non_target_sum
+                elif self.co2_index is not None:
+                    ymix[lev, self.co2_index] = residual
+
+            ymix[lev, ymix[lev] < 0.] = 0.
+            mix_sum = np.sum(ymix[lev])
+            if mix_sum <= 0.:
+                raise IOError(f'gcm_nudge produced a zero total mixing ratio at nz = {lev}')
+            ymix[lev] /= mix_sum
+
+        var.ymix = ymix
+        var.y = np.vstack(atm.n_0) * var.ymix
+        var = self.odesolver.loss(var)
         return var
         
     def update_mu_dz(self, var, atm, make_atm): #y, ni, spec, Tco, pco
@@ -1066,7 +1153,15 @@ class Integration(object):
         '''
         To check the convergence criteria and stop the integration 
         '''
-        if var.t > vulcan_cfg.trun_min and para.count > vulcan_cfg.count_min and self.conv(var, para, atm):
+        if self.gcm_nudge is not None and var.t >= self.gcm_nudge['timed_run_end_sec']:
+            print (
+                'Timed gcm_nudge integration completed after '
+                + str(para.count) + ' steps at t = ' + "{:.2e}".format(var.t) + ' s'
+            )
+            self.output.print_timed_end_msg(var, para, self.gcm_nudge)
+            para.end_case = 4
+            return True
+        elif self.gcm_nudge is None and var.t > vulcan_cfg.trun_min and para.count > vulcan_cfg.count_min and self.conv(var, para, atm):
             print ('Integration successful with ' + str(para.count) + ' steps and long dy, long dydt = ' + str(var.longdy) + ' ,' + str(var.longdydt) + '\nActinic flux change: ' + '{:.2E}'.format(var.aflux_change)) 
             self.output.print_end_msg(var, para)
             para.end_case = 1
@@ -1427,6 +1522,7 @@ class ODESolver(object):
         self.mtol = vulcan_cfg.mtol
         self.atol = vulcan_cfg.atol
         self.non_gas_sp = vulcan_cfg.non_gas_sp
+        self.gcm_nudge = None
         
         if vulcan_cfg.use_condense == True:  
             self.non_gas_sp_index = [species.index(sp) for sp in self.non_gas_sp]
@@ -3102,10 +3198,20 @@ class Ros2(ODESolver):
                   
         return var, para                    
         
-    def step_size(self, var, para, dt_var_min = vulcan_cfg.dt_var_min, dt_var_max = vulcan_cfg.dt_var_max, dt_min = vulcan_cfg.dt_min, dt_max = vulcan_cfg.dt_max):  
+    def step_size(self, var, para, dt_var_min = None, dt_var_max = None, dt_min = None, dt_max = None):  
         """
         step-size control by delta(truncation error) for the Rosenbrock method
         """
+        if dt_var_min is None: dt_var_min = vulcan_cfg.dt_var_min
+        if dt_var_max is None: dt_var_max = vulcan_cfg.dt_var_max
+        if dt_min is None: dt_min = vulcan_cfg.dt_min
+        if dt_max is None: dt_max = vulcan_cfg.dt_max
+        if self.gcm_nudge is not None:
+            dt_max = min(dt_max, 0.1 * self.gcm_nudge['min_frame_dt_sec'])
+            time_remaining = self.gcm_nudge['timed_run_end_sec'] - var.t
+            if time_remaining > 0.:
+                dt_max = min(dt_max, time_remaining)
+
         h = var.dt
         delta = para.delta
         rtol = vulcan_cfg.rtol
@@ -3171,7 +3277,31 @@ class Output(object):
         print ('delta rejected counter:')
         print (para.delta_count)
         if vulcan_cfg.use_shark == True: print ("It's a long journey to this shark planet. Don't stop bleeding.")
-        print ('------ Live long and prosper \V/ ------') 
+        print ('------ Live long and prosper \\V/ ------') 
+
+    def print_timed_end_msg(self, var, para, setup):
+        print ("After ------- %s seconds -------" % ( time.time()- para.start_time ) + ' s CPU time')
+        print (
+            vulcan_cfg.out_name[:-4]
+            + ' has completed the prescribed gcm_nudge run with '
+            + str(para.count) + ' steps and ' + str("{:.2e}".format(var.t)) + ' s'
+        )
+        print(
+            'driver window = ' + "{:.2e}".format(setup['last_frame_time_sec'])
+            + ' s, hold-last end = ' + "{:.2e}".format(setup['hold_last_end_sec'])
+            + ' s, final end = ' + "{:.2e}".format(setup['timed_run_end_sec']) + ' s'
+        )
+        print ('long dy = ' + f"{var.longdy:.6e}" + ' and long dy/dt = ' + f"{var.longdydt:.6e}" )
+        print ('total atom loss:')
+        for atom in vulcan_cfg.atom_list:
+            if atom not in getattr(vulcan_cfg, 'loss_ex', []):
+                print (atom + ': ' + f"{var.atom_loss[atom]:.4e}" + ' ')
+        print ('negative solution counter:')
+        print (para.nega_count)
+        print ('loss rejected counter:')
+        print (para.loss_count)
+        print ('delta rejected counter:')
+        print (para.delta_count)
 
     def print_unconverged_msg(self, var, para, case): 
         
@@ -3261,6 +3391,9 @@ class Output(object):
         images = []
         colors = ['b','g','r','c','m','y','k','orange','pink', 'grey',\
         'darkred','darkblue','salmon','chocolate','mediumspringgreen','steelblue','plum','hotpink']
+        plot_spec = [sp for sp in vulcan_cfg.plot_spec if sp in species]
+        if not plot_spec:
+            return
         
         tex_labels = {'H':'H','H2':'H$_2$','O':'O','OH':'OH','H2O':'H$_2$O','CH':'CH','C':'C','CH2':'CH$_2$','CH3':'CH$_3$','CH4':'CH$_4$','HCO':'HCO','H2CO':'H$_2$CO', 'C4H2':'C$_4$H$_2$',\
         'C2':'C$_2$','C2H2':'C$_2$H$_2$','C2H3':'C$_2$H$_3$','C2H':'C$_2$H','CO':'CO','CO2':'CO$_2$','He':'He','O2':'O$_2$','CH3OH':'CH$_3$OH','C2H4':'C$_2$H$_4$','C2H5':'C$_2$H$_5$','C2H6':'C$_2$H$_6$','CH3O': 'CH$_3$O'\
@@ -3269,7 +3402,7 @@ class Output(object):
         plt.figure('live mixing ratios')
         plt.ion()
         color_index = 0
-        for color_index, sp in enumerate(vulcan_cfg.plot_spec):
+        for color_index, sp in enumerate(plot_spec):
             if sp in tex_labels: sp_lab = tex_labels[sp]
             else: sp_lab = sp
             if color_index == len(para.tableau20): # when running out of colors
@@ -3338,10 +3471,13 @@ class Output(object):
         plot_dir = vulcan_cfg.plot_dir
         colors = ['b','g','r','c','m','y','k','orange','pink', 'grey',\
         'darkred','darkblue','salmon','chocolate','mediumspringgreen','steelblue','plum','hotpink']
+        plot_spec = [sp for sp in vulcan_cfg.plot_spec if sp in species]
+        if not plot_spec:
+            return
         
         plt.figure('live mixing ratios')
         color_index = 0
-        for sp in vulcan_cfg.plot_spec:
+        for sp in plot_spec:
             if vulcan_cfg.plot_height == False:
                 line, = plt.plot(var.ymix[:,species.index(sp)], atm.pco/1.e6, color = colors[color_index], label=sp)
                 plt.gca().set_yscale('log')
@@ -3370,13 +3506,15 @@ class Output(object):
             
     def plot_evo(self, var, atm, plot_j=-1, plot_ymin=1e-20, dn=1):
         
-        plot_spec = vulcan_cfg.plot_spec
+        plot_spec = [sp for sp in vulcan_cfg.plot_spec if sp in species]
+        if not plot_spec:
+            return
         plot_dir = vulcan_cfg.plot_dir
         plt.figure('evolution')
         
         ymix_time = np.array(var.y_time/atm.n_0[:,np.newaxis])
         
-        for i,sp in enumerate(vulcan_cfg.plot_spec):
+        for i,sp in enumerate(plot_spec):
             plt.plot(var.t_time[::dn], ymix_time[::dn,plot_j,species.index(sp)],c = plt.cm.rainbow(float(i)/len(plot_spec)),label=sp)
 
         plt.gca().set_xscale('log')       
@@ -3399,11 +3537,13 @@ class Output(object):
         var.t_time = np.array(var.t_time)
         ymix_time = np.array(var.y_time/atm.n_0[:,np.newaxis])
         
-        plot_spec = vulcan_cfg.plot_spec
+        plot_spec = [sp for sp in vulcan_cfg.plot_spec if sp in species]
+        if not plot_spec:
+            return
         plot_dir = vulcan_cfg.plot_dir
         plt.figure('evolution')
     
-        for i,sp in enumerate(vulcan_cfg.plot_spec):
+        for i,sp in enumerate(plot_spec):
             plt.plot(var.t_time[::dn], ymix_time[::dn,plot_j,species.index(sp)],c = plt.cm.rainbow(float(i)/len(plot_spec)),label=sp)
 
         plt.gca().set_xscale('log')       

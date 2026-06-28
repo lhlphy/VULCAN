@@ -11,6 +11,7 @@ import vulcan_cfg
 from phy_const import kb, Navo, r_sun, au
 from vulcan_cfg import nz
 import chem_funs
+import gcm_nudge
 from chem_funs import ni, nr  # number of species and reactions in the network
 species = chem_funs.spec_list
 
@@ -23,7 +24,22 @@ type_list.insert(0,'U20'); type_list.append('float')
 compo = np.genfromtxt(vulcan_cfg.com_file,names=True,dtype=type_list)
 # dtype=None in python 2.X but Sx -> Ux in python3
 compo_row = list(compo['species'])
+element_columns = [name for name in compo.dtype.names if name not in ('species', 'mass')]
 ### read in the basic chemistry data
+
+
+def _species_contains_only_atoms(sp, allowed_atoms):
+    row = compo[compo_row.index(sp)]
+    has_allowed_atom = False
+    for atom in element_columns:
+        if atom == 'e':
+            continue
+        if row[atom] == 0:
+            continue
+        if atom not in allowed_atoms:
+            return False
+        has_allowed_atom = True
+    return has_allowed_atom
 
 
 class InitialAbun(object):
@@ -137,6 +153,61 @@ class InitialAbun(object):
         
         try: subprocess.check_call(["./fastchem input/config.input"], shell=True, cwd='fastchem_vulcan/') # check_call instead of call can catch the error 
         except: print ('\n FastChem cannot run properly. Try compile it by running make under /fastchem_vulcan\n'); raise
+
+    def ini_fc_co2_background(self, background_pressure, temperature):
+        if vulcan_cfg.use_ion == True:
+            copyfile('fastchem_vulcan/input/parameters_ion.dat', 'fastchem_vulcan/input/parameters.dat')
+        else:
+            copyfile('fastchem_vulcan/input/parameters_wo_ion.dat', 'fastchem_vulcan/input/parameters.dat')
+
+        abundance_map = {
+            'C': 12.0000,
+            'O': 12.30103,
+            'H': -30.0000,
+            'He': -30.0000,
+            'N': -30.0000,
+            'S': -30.0000,
+            'P': -30.0000,
+            'Si': -30.0000,
+            'Ti': -30.0000,
+            'V': -30.0000,
+            'Cl': -30.0000,
+            'K': -30.0000,
+            'Na': -30.0000,
+            'Mg': -30.0000,
+            'F': -30.0000,
+            'Ca': -30.0000,
+            'Fe': -30.0000,
+            'e-': 0.0000,
+        }
+
+        abundance_lines = ['#Pure CO2 background for GCM nudging']
+        with open('fastchem_vulcan/input/solar_element_abundances.dat', 'r') as handle:
+            for line in handle:
+                if line.startswith('#') or not line.strip():
+                    continue
+                name = line.split()[0].strip()
+                if name not in abundance_map:
+                    raise IOError(f'FastChem element {name} missing from CO2 background abundance map.')
+                abundance_lines.append(f'{name}\t{abundance_map[name]:.5f}')
+
+        with open('fastchem_vulcan/input/element_abundances_vulcan.dat', 'w') as handle:
+            handle.write('\n'.join(abundance_lines) + '\n')
+
+        with open('fastchem_vulcan/input/vulcan_TP/vulcan_TP.dat', 'w') as handle:
+            handle.write('#p (bar)    T (K)\n')
+            for pressure, temp in zip(background_pressure, temperature):
+                handle.write('{:.6e}\t{:.6f}\n'.format(pressure/1.0e6, temp))
+
+        try:
+            subprocess.check_call(["./fastchem input/config.input"], shell=True, cwd='fastchem_vulcan/')
+        except:
+            print('\n FastChem cannot run properly. Try compile it by running make under /fastchem_vulcan\n')
+            raise
+
+        fc = np.genfromtxt('fastchem_vulcan/output/vulcan_EQ.dat', names=True, dtype=None, skip_header=0)
+        subprocess.call(["rm vulcan_EQ.dat"], shell=True, cwd='fastchem_vulcan/output/')
+        return fc
            
     def ini_y(self, data_var, data_atm): 
         # initial mixing ratios of the molecules
@@ -201,6 +272,45 @@ class InitialAbun(object):
             if vulcan_cfg.use_ion == True:
                 for sp in species: 
                     if compo[compo_row.index(sp)]['e'] != 0: charge_list.append(sp)
+
+        elif vulcan_cfg.ini_mix == 'gcm_nudge':
+            driver = gcm_nudge.validate_pressure_grid(data_atm.pco)
+            fc = self.ini_fc_co2_background(
+                driver['background_pressure_dyn_cm2'][0].astype(float),
+                driver['temp_K'][0].astype(float),
+            )
+
+            if 'SiO' not in species or 'SiO2' not in species:
+                raise IOError('The active network must include both SiO and SiO2 for gcm_nudge mode.')
+
+            mix_init = np.zeros((nz, ni))
+            background_indices = []
+            for sp in species:
+                if not _species_contains_only_atoms(sp, {'C', 'O'}):
+                    continue
+                if sp not in fc.dtype.names:
+                    continue
+                mix_init[:, species.index(sp)] = np.asarray(fc[sp], dtype=float)
+                background_indices.append(species.index(sp))
+
+            if not background_indices:
+                raise IOError('No C/O-only background species were found in the FastChem output.')
+
+            background_sum = np.sum(mix_init[:, background_indices], axis=1)
+            if np.any(background_sum <= 0.0):
+                raise IOError('FastChem returned a non-positive C/O-only background sum for gcm_nudge initialisation.')
+
+            mix_init[:, background_indices] *= np.vstack(
+                driver['background_mole_fraction'][0].astype(float) / background_sum
+            )
+            mix_init[:, species.index('SiO')] = driver['sio_mole_fraction'][0].astype(float)
+            mix_init[:, species.index('SiO2')] = driver['sio2_mole_fraction'][0].astype(float)
+
+            mix_sum = np.sum(mix_init, axis=1)
+            if np.any(mix_sum <= 0.0):
+                raise IOError('The gcm_nudge initial composition sums to zero in at least one layer.')
+            mix_init /= np.vstack(mix_sum)
+            y_ini[:] = np.vstack(gas_tot) * mix_init
                 
         else:
             for i in range(nz):
@@ -333,6 +443,7 @@ class Atm(object):
     def load_TPK(self, data_atm):
         
         PTK_fun = {}
+        atm_table = None
         
         # IF switches for TP types
         if self.type == 'isothermal': 
@@ -354,13 +465,8 @@ class Atm(object):
         # for atm_type = 'file' and also Kzz_prof = 'file
         elif self.type == 'file':
             
-            if self.Kzz_prof == 'file':
-                atm_table = np.genfromtxt(vulcan_cfg.atm_file, names=True, dtype=None, skip_header=1)
-                p_file, T_file, Kzz_file = atm_table['Pressure'], atm_table['Temp'], atm_table['Kzz']
-            
-            else:     
-                atm_table = np.genfromtxt(vulcan_cfg.atm_file, names=True, dtype=None, skip_header=1)
-                p_file, T_file = atm_table['Pressure'], atm_table['Temp']
+            atm_table = np.genfromtxt(vulcan_cfg.atm_file, names=True, dtype=None, skip_header=1)
+            p_file, T_file = atm_table['Pressure'], atm_table['Temp']
 
             if max(p_file) < data_atm.pco[0] or min(p_file) > data_atm.pco[-1]:
                 print ('Warning: P_b and P_t assgined in vulcan.cfg are out of range of the input.\nConstant extension is used.')
@@ -375,20 +481,11 @@ class Atm(object):
             except ValueError:
                 PTK_fun['pT'] = interpolate.interp1d(p_file, T_file, assume_sorted = False, bounds_error=False, fill_value=T_file[np.argmin(p_file)] )  
                 data_atm.Tco = PTK_fun['pT'](data_atm.pco)
-            
-            
-            if self.use_Kzz == True and self.Kzz_prof == 'file': 
-                
-                PTK_fun['pK'] = interpolate.interp1d(p_file, Kzz_file, assume_sorted = False, bounds_error=False, fill_value=(Kzz_file[np.argmin(p_file)], Kzz_file[np.argmax(p_file)]) )
-                # store Kzz in data_atm
-                try:
-                    data_atm.Kzz = PTK_fun['pK'](data_atm.pico[1:-1])
-                # for SciPy earlier than v0.18.0
-                except ValueError:
-                    PTK_fun['pK'] = interpolate.interp1d(p_file, Kzz_file, assume_sorted = False, bounds_error=False, fill_value=Kzz_file[np.argmin(p_file)] )
-                    data_atm.Kzz = PTK_fun['pK'](data_atm.pico[1:-1])
-            
-            elif self.Kzz_prof == 'const': data_atm.Kzz = np.repeat(self.const_Kzz,nz-1)
+
+        elif self.type == 'gcm_nudge':
+            driver = gcm_nudge.validate_pressure_grid(data_atm.pco)
+            data_atm.pco = driver['pressure'].copy()
+            data_atm.Tco = driver['temp_K'][0].astype(float).copy()
         
         elif self.type == 'vulcan_ini':
             print ("Initializing PT from the prvious run " + vulcan_cfg.vul_ini)
@@ -417,12 +514,40 @@ class Atm(object):
             data_atm.Kzz = vulcan_cfg.K_max * (vulcan_cfg.K_p_lev*1e6 /(data_atm.pico[1:-1]))**0.4
             data_atm.Kzz = np.maximum(vulcan_cfg.K_max, data_atm.Kzz)
         
-        elif self.Kzz_prof == 'file': pass # already defined within atm_type = 'file     
+        elif self.Kzz_prof == 'file':
+            if atm_table is None:
+                atm_table = np.genfromtxt(vulcan_cfg.atm_file, names=True, dtype=None, skip_header=1)
+            if 'Kzz' not in atm_table.dtype.names:
+                raise IOError('Kzz_prof = "file" requires a Kzz column in vulcan_cfg.atm_file.')
+
+            p_file, Kzz_file = atm_table['Pressure'], atm_table['Kzz']
+            PTK_fun['pK'] = interpolate.interp1d(
+                p_file,
+                Kzz_file,
+                assume_sorted=False,
+                bounds_error=False,
+                fill_value=(Kzz_file[np.argmin(p_file)], Kzz_file[np.argmax(p_file)]),
+            )
+            try:
+                data_atm.Kzz = PTK_fun['pK'](data_atm.pico[1:-1])
+            except ValueError:
+                PTK_fun['pK'] = interpolate.interp1d(
+                    p_file,
+                    Kzz_file,
+                    assume_sorted=False,
+                    bounds_error=False,
+                    fill_value=Kzz_file[np.argmin(p_file)],
+                )
+                data_atm.Kzz = PTK_fun['pK'](data_atm.pico[1:-1])
         else: raise IOError ('\n"Kzz_prof" (the type of Kzz profile) cannot be recongized.\nPlease assign it as "file" or "const" or "JM16" in vulcan_cfg.')
         
         # IF switches for Vz types
         if self.vz_prof == 'const': data_atm.vz = np.repeat(self.const_vz,nz-1)
         elif self.vz_prof == 'file': 
+            if atm_table is None:
+                atm_table = np.genfromtxt(vulcan_cfg.atm_file, names=True, dtype=None, skip_header=1)
+            if 'vz' not in atm_table.dtype.names:
+                raise IOError('vz_prof = "file" requires a vz column in vulcan_cfg.atm_file.')
             inter_vz = interpolate.interp1d( atm_table['Pressure'], atm_table['vz'], assume_sorted = False, bounds_error=False, fill_value=0 )
             data_atm.vz =  inter_vz(data_atm.pico[1:-1])
         else: raise IOError ('\n"vz_prof" cannot be recongized.\nPlease assign it as "file" or "const" in vulcan_cfg.')

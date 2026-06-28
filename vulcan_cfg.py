@@ -3,10 +3,10 @@
 # ============================================================================= 
 
 # ====== Setting up the elements included in the network ======
-atom_list = ['H', 'O', 'C', 'N', 'S',  'He']
+atom_list = ['C', 'O', 'Si']
 # ====== Setting up paths and filenames for the input and output files  ======
 # input:
-network = 'thermo/SNCHO_photo_network_2025.txt'
+network = 'thermo/CHOSi_photo_network.txt'
 use_lowT_limit_rates = False
 gibbs_text = 'thermo/gibbs_text.txt' # (all the nasa9 files must be placed in the folder: thermo/NASA9/)
 cross_folder = 'thermo/photo_cross/'
@@ -16,11 +16,15 @@ sflux_file = 'atm/stellar_flux/sflux-HD189_Moses11.txt' # sflux-HD189_B2020.txt 
 top_BC_flux_file = 'atm/BC_top.txt' # the file for the top boundary conditions
 bot_BC_flux_file = 'atm/BC_bot.txt' # the file for the lower boundary conditions
 vul_ini = 'output/' # the file to initialize the abundances for ini_mix = 'vulcan_ini'
+gcm_nudge_file = 'atm/gcm_columns/day0070h00.atmos_ins_on_vulcan_pressure.nc'
+gcm_nudge_tau_fraction = 1./3.
+gcm_nudge_hold_last_days = 1.
+gcm_nudge_free_run_days = 1.
 # output:
 output_dir = 'output/'
 plot_dir = 'plot/'
 movie_dir = 'plot/movie/'
-out_name =  'HD189-test.vul' # output file name
+out_name =  'HD189-gcm-nudge.vul' # output file name
 
 # ====== Setting up the elemental abundance ======
 use_solar = True # True: using the solar abundance from Table 8. K.Lodders 2019; False: using the customized elemental abundance. 
@@ -30,7 +34,7 @@ C_H = 2.95E-4
 N_H = 7.08E-5
 S_H = 1.41E-5
 He_H = 0.0838
-ini_mix = 'EQ' # Options: 'EQ', 'const_mix', 'vulcan_ini', 'table' (for 'vulcan_ini, the T-P grids have to be exactly the same)
+ini_mix = 'gcm_nudge' # Options: 'EQ', 'const_mix', 'vulcan_ini', 'table', 'gcm_nudge'
 fastchem_met_scale = 1. # scaling factor for other elements in fastchem (e.g., if fastchem_met_scale = 0.1, other elements such as Si and Mg will take 0.1 solar values)
 
 use_ini_cold_trap = True #True
@@ -65,7 +69,7 @@ if use_photo == False and use_ion == True:
 
 
 # ====== Setting up parameters for the atmosphere ======
-atm_base = 'H2' #Options: 'H2', 'N2', 'O2', 'CO2 -- the bulk gas of the atmosphere: changes the molecular diffsion, thermal diffusion factor, and settling velocity
+atm_base = 'CO2' #Options: 'H2', 'N2', 'O2', 'CO2 -- the bulk gas of the atmosphere: changes the molecular diffsion, thermal diffusion factor, and settling velocity
 rocky = False # for the surface gravity
 nz = 120   # number of vertical layers
 P_b = 1e9  # pressure at the bottom (dyne/cm^2)
@@ -74,7 +78,7 @@ use_Kzz = True
 use_moldiff = True
 use_vm_mol = False # use upwind scheme for molecular diffusion -- under testing
 use_vz = False
-atm_type = 'file'  # Options: 'isothermal', 'analytical', 'file', or 'vulcan_ini' 'table'
+atm_type = 'gcm_nudge'  # Options: 'isothermal', 'analytical', 'file', 'vulcan_ini', 'table', or 'gcm_nudge'
 Kzz_prof = 'file' # Options: 'const','file' or 'Pfunc' (Kzz increased with P^-0.4)
 K_max = 1e5        # for Kzz_prof = 'Pfunc'
 K_p_lev = 0.1      # for Kzz_prof = 'Pfunc'
@@ -149,6 +153,7 @@ flux_cri = 0.1
 flux_atol = 1. # the tol for actinc flux (# photons cm-2 s-1 nm-1)
 ### use with caution
 conver_ignore = [] # added 2023. to get rid off non-convergent species, e.g. HC3N without sinks 
+loss_ex = ['O', 'Si']
 
 # ====== Setting up numerical parameters for Ros2 ODE solver ====== 
 rtol = 0.25             # relative tolerence for adjusting the stepsize 
@@ -160,7 +165,7 @@ rtol_max = 2.5
 # ====== Setting up for ouwtput and plotting ======
 # plotting:
 plot_TP = False
-use_live_plot = True
+use_live_plot = False
 use_live_flux = False
 use_plot_end = False
 use_plot_evo = False
@@ -171,7 +176,7 @@ use_PIL = True
 live_plot_frq = 10
 save_movie_rate = live_plot_frq
 y_time_freq = 1  #  storing data for every 'y_time_freq' step
-plot_spec = ['H2O', 'CH4', 'CO', 'CO2', 'NH3', 'HCN', 'H2S', 'SO2']
+plot_spec = ['CO', 'CO2', 'SiO', 'SiO2']
 # output:
 output_humanread = False
 use_shark = False
