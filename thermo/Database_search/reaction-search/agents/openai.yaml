@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reaction Search"
+  short_description: "Find and select chemical reaction kinetics"
+  default_prompt: "Use $reaction-search to manually find a reliable reaction rate and convert it to VULCAN format."

@@ -3,10 +3,10 @@
 # ============================================================================= 
 
 # ====== Setting up the elements included in the network ======
-atom_list = ['C', 'H', 'O', 'Si']
+atom_list = ['H', 'O', 'C', 'N', 'S',  'He']
 # ====== Setting up paths and filenames for the input and output files  ======
 # input:
-network = 'thermo/CHOSi_photo_network.txt'
+network = 'thermo/SNCHO_photo_network_2025.txt'
 use_lowT_limit_rates = False
 gibbs_text = 'thermo/gibbs_text.txt' # (all the nasa9 files must be placed in the folder: thermo/NASA9/)
 cross_folder = 'thermo/photo_cross/'
@@ -20,7 +20,7 @@ vul_ini = 'output/' # the file to initialize the abundances for ini_mix = 'vulca
 output_dir = 'output/'
 plot_dir = 'plot/'
 movie_dir = 'plot/movie/'
-out_name =  '55Cnce-CO2-SiO2-H2-pho.vul' # output file name
+out_name =  'HD189-test.vul' # output file name
 
 # ====== Setting up the elemental abundance ======
 use_solar = True # True: using the solar abundance from Table 8. K.Lodders 2019; False: using the customized elemental abundance. 
@@ -30,22 +30,22 @@ C_H = 2.95E-4
 N_H = 7.08E-5
 S_H = 1.41E-5
 He_H = 0.0838
-ini_mix = 'const_mix' # Options: 'EQ', 'const_mix', 'vulcan_ini', 'table' (for 'vulcan_ini, the T-P grids have to be exactly the same)
+ini_mix = 'EQ' # Options: 'EQ', 'const_mix', 'vulcan_ini', 'table' (for 'vulcan_ini, the T-P grids have to be exactly the same)
 fastchem_met_scale = 1. # scaling factor for other elements in fastchem (e.g., if fastchem_met_scale = 0.1, other elements such as Si and Mg will take 0.1 solar values)
 
 use_ini_cold_trap = True #True
 # Initialsing uniform (constant with pressure) mixing ratios (only reads when ini_mix = const_mix)
-const_mix = {'CO2': 0.85, 'SiO2': 0.10, 'H2': 0.05}
+const_mix = {'CH4':2.7761E-4*2, 'O2':4.807e-4, 'He':0.09691, 'N2':8.1853E-5, 'H2':1. -2.7761E-4*2*4/2} 
 
 # ====== Setting up photochemistry ======
-use_photo = 1 # 1: use photochemistry; 0: no photochemistry
+use_photo = 0
 # astronomy input
-r_star = 0.97223094 # stellar radius in solar radius, derived from L=2.37985e26 W and T=5198 K
-Rp = 1.216861E9 # planetary radius (cm): 12168.61 km
-orbit_radius = 0.01543939 # planet-star distance (AU): 2.3097e9 m
+r_star = 0.805 # stellar radius in solar radius
+Rp = 1.138*7.1492E9 # Planetary radius (cm) (for computing gravity)
+orbit_radius = 0.03142 # planet-star distance in A.U.
 sl_angle = 48 /180.*3.14159 # the zenith angle of the star in degree (usually 58 deg for the dayside average)
 f_diurnal = 1. # to account for the diurnal average of solar flux (i.e. 0.5 for Earth; 1 for tidally-locked planets) 
-scat_sp = ['CO2'] # the bulk gases that contribute to Rayleigh scattering
+scat_sp = ['H2', 'He'] # the bulk gases that contribute to Rayleigh scattering
 T_cross_sp = [] # warning: slower start! available atm: 'CO2','H2O','NH3', 'SH','H2S','SO2', 'S2', 'COS', 'CS2'
 
 edd = 0.5 # the Eddington coefficient 
@@ -65,22 +65,22 @@ if use_photo == False and use_ion == True:
 
 
 # ====== Setting up parameters for the atmosphere ======
-atm_base = 'CO2' #Options: 'H2', 'N2', 'O2', 'CO2 -- the bulk gas of the atmosphere: changes the molecular diffsion, thermal diffusion factor, and settling velocity
-rocky = True # for the surface gravity
-nz = 100   # number of vertical layers
-P_b = 1e7  # pressure at the bottom (dyne/cm^2): 1e6 Pa
-P_t = 1e-2 # pressure at the top (dyne/cm^2): 1e-3 Pa
+atm_base = 'H2' #Options: 'H2', 'N2', 'O2', 'CO2 -- the bulk gas of the atmosphere: changes the molecular diffsion, thermal diffusion factor, and settling velocity
+rocky = False # for the surface gravity
+nz = 120   # number of vertical layers
+P_b = 1e9  # pressure at the bottom (dyne/cm^2)
+P_t = 1e-2 # pressure at the top (dyne/cm^2)
 use_Kzz = True
 use_moldiff = True
 use_vm_mol = False # use upwind scheme for molecular diffusion -- under testing
 use_vz = False
-atm_type = 'isothermal'  # Options: 'isothermal', 'analytical', 'file', or 'vulcan_ini' 'table'
-Kzz_prof = 'Pfunc' # Options: 'const','file' or 'Pfunc' (Kzz increased with P^-0.4)
+atm_type = 'file'  # Options: 'isothermal', 'analytical', 'file', or 'vulcan_ini' 'table'
+Kzz_prof = 'file' # Options: 'const','file' or 'Pfunc' (Kzz increased with P^-0.4)
 K_max = 1e5        # for Kzz_prof = 'Pfunc'
 K_p_lev = 0.1      # for Kzz_prof = 'Pfunc'
 vz_prof = 'const'  # Options: 'const' or 'file'
-gs = 2170.         # surface gravity (cm/s^2): 21.7 m/s^2
-Tiso = 2200 # only read when atm_type = 'isothermal'
+gs = 2140.         # surface gravity (cm/s^2)  (HD189:2140  HD209:936)
+Tiso = 1000 # only read when atm_type = 'isothermal'
 # setting the parameters for the analytical T-P from (126)in Heng et al. 2014. Only reads when atm_type = 'analytical' 
 # T_int, T_irr, ka_L, ka_S, beta_S, beta_L
 para_warm = [120., 1500., 0.1, 0.02, 1., 1.]
@@ -96,7 +96,7 @@ update_frq = 100
 use_topflux = False
 use_botflux = False
 use_fix_sp_bot = {} # fixed mixing ratios at the lower boundary
-diff_esc = [] # species for diffusion-limit escape at TOA
+diff_esc = ['H'] # species for diffusion-limit escape at TOA
 max_flux = 1e13  # upper limit for the diffusion-limit fluxes
 use_sat_surfaceH2O = True
 
@@ -162,16 +162,16 @@ rtol_max = 2.5
 plot_TP = False
 use_live_plot = True
 use_live_flux = False
-use_plot_end = True
+use_plot_end = False
 use_plot_evo = False
-use_save_movie = True
+use_save_movie = False
 use_flux_movie = False
 plot_height = False
 use_PIL = True 
-live_plot_frq = 100
+live_plot_frq = 10
 save_movie_rate = live_plot_frq
 y_time_freq = 1  #  storing data for every 'y_time_freq' step
-plot_spec = ['CO2', 'SiO2', 'SiO', 'Si', 'SiH', 'H2', 'H2O', 'CO', 'O2', 'O', 'H', 'OH']
+plot_spec = ['H2O', 'CH4', 'CO', 'CO2', 'NH3', 'HCN', 'H2S', 'SO2']
 # output:
 output_humanread = False
 use_shark = False

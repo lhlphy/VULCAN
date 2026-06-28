@@ -1,6 +1,9 @@
 # Generated VULCAN/FastChem outputs
 output/
 fastchem_vulcan/output/
+plot/
+thermo/Database_search/data_temp/
+__pycache__/
 
 # FastChem build products
 fastchem_vulcan/fastchem
