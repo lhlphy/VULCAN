@@ -19,6 +19,10 @@ REQUIRED_DRIVER_VARS = (
     "sio2_mole_fraction",
     "background_mole_fraction",
 )
+EXPECTED_DRIVER_ATTRS = {
+    "pressure_reconstruction": "hybrid_pk_bk_ps",
+    "driver_grid": "fixed_vulcan_pressure",
+}
 
 _DRIVER_CACHE: dict[Path, dict[str, np.ndarray | float | str]] = {}
 
@@ -34,6 +38,16 @@ def _validate_required_coords(ds: xr.Dataset) -> None:
     missing = [name for name in ("time", "pressure") if name not in ds.coords]
     if missing:
         raise IOError("Missing required GCM nudging coordinates: " + ", ".join(missing))
+
+
+def _validate_required_attrs(ds: xr.Dataset) -> None:
+    for key, expected_value in EXPECTED_DRIVER_ATTRS.items():
+        actual_value = ds.attrs.get(key)
+        if actual_value != expected_value:
+            raise IOError(
+                "The GCM nudging driver is not a valid hybrid-reconstructed runtime driver. "
+                f"Expected attr {key}={expected_value!r}, got {actual_value!r}."
+            )
 
 
 def _extract_driver_array(ds: xr.Dataset, name: str) -> np.ndarray:
@@ -75,10 +89,12 @@ def load_gcm_nudge_driver(path: str | Path | None = None) -> dict[str, np.ndarra
     print(f"Loading GCM nudging driver once from {resolved_path}")
     with xr.open_dataset(resolved_path, decode_times=False) as ds:
         _validate_required_coords(ds)
+        _validate_required_attrs(ds)
         driver = {
             "source_file": str(resolved_path),
             "time_raw_hours": np.asarray(ds["time"].values, dtype=float),
             "pressure": np.asarray(ds["pressure"].values, dtype=float),
+            "pressure_reconstruction": str(ds.attrs["pressure_reconstruction"]),
         }
         for name in REQUIRED_DRIVER_VARS:
             driver[name] = _extract_driver_array(ds, name)
